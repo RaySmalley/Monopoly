@@ -8,15 +8,16 @@ trap {
     Write-Host "Character: $($_.InvocationInfo.OffsetInLine)" -ForegroundColor Red
     if ($Window) {
         $Window.TaskbarItemInfo.Overlay = $null
-        $Window.Dispatcher.InvokeShutdown()
-        $Window.Close()
+        $Window.Dispatcher.Invoke([Action]{$Window.Close()})
+        #$Window.Dispatcher.InvokeShutdown()
+        #$Window.Close()
     }
     Exit 1
 }
 
 # Some settings
 $host.UI.RawUI.WindowTitle = "Monopoly!"
-$Testing = $true
+$Testing = $false
 $Pause = 1000 # In Milliseconds
 $TotalHouses = 0
 $TotalHotels = 0
@@ -60,12 +61,13 @@ if (!$psISE) {
 
 # Dice rolling function
 function DiceRoll {
-    #$Die1Roll = Get-Random -Minimum 1 -Maximum 7
-    #$Die2Roll = Get-Random -Minimum 1 -Maximum 7
-
     $DiceFaces = "$PSScriptRoot\Dice.png"
     $DiceFacesImage = [System.Windows.Media.Imaging.BitmapImage]::new($DiceFaces)
+    $DiceImages = @( $null, (GetDiceFace 1), (GetDiceFace 2), (GetDiceFace 3), (GetDiceFace 4), (GetDiceFace 5), (GetDiceFace 6))
+    $LastDie1Roll = $null
+    $LastDie2Roll = $null
 
+    # Get individual dice faces from image
     function GetDiceFace($FaceNumber) {
         $X = ($FaceNumber - 1) * 200
         $Y = 0
@@ -73,35 +75,24 @@ function DiceRoll {
         return [System.Windows.Media.Imaging.CroppedBitmap]::new($DiceFacesImage, $Rect)
     }
 
-    $DiceImages = @( $null, (GetDiceFace 1), (GetDiceFace 2), (GetDiceFace 3), (GetDiceFace 4), (GetDiceFace 5), (GetDiceFace 6))
-
-    $LastDie1Roll = $null
-    $LastDie2Roll = $null
-
     # Simple dice roll animation
     for ($i = 0; $i -lt 10; $i++) {
-            do {
-                $Die1Roll = (Get-Random -Minimum 1 -Maximum 7)
-            } while ($Die1Roll -eq $LastDie1Roll)
-            $LastDie1Roll = $Die1Roll
+        do {
+            $Die1Roll = (Get-Random -Minimum 1 -Maximum 7)
+        } while ($Die1Roll -eq $LastDie1Roll)
+        $LastDie1Roll = $Die1Roll
 
-            do {
-                $Die2Roll = (Get-Random -Minimum 1 -Maximum 7)
-            } while ($Die2Roll -eq $LastDie2Roll)
-            $LastDie2Roll = $Die2Roll
+        do {
+            $Die2Roll = (Get-Random -Minimum 1 -Maximum 7)
+        } while ($Die2Roll -eq $LastDie2Roll)
+        $LastDie2Roll = $Die2Roll
 
+        # Update dice images in the UI
+        $DieImage1.Source = $DiceImages[$Die1Roll]
+        $DieImage2.Source = $DiceImages[$Die2Roll]
         $Window.Dispatcher.Invoke([Action]{
-            $DieImage1.Source = $DiceImages[$Die1Roll]
-            $DieImage2.Source = $DiceImages[$Die2Roll]
         }, [System.Windows.Threading.DispatcherPriority]::Background)
-        if (!$Testing) {Start-Sleep -Milliseconds (100 + ($i * 10))}
     }
-
-    # Update dice images in the UI
-    #$Window.Dispatcher.Invoke([Action]{
-    #    $DiceImage1.Source = $DiceImages[$Die1Roll]
-    #    $DiceImage2.Source = $DiceImages[$Die2Roll]
-    #}, [System.Windows.Threading.DispatcherPriority]::Background)
 
     if ($Die1Roll -eq $Die2Roll) {$Double = $true} else {$Double = $false}
     $Roll = $Die1Roll + $Die2Roll
@@ -1189,7 +1180,9 @@ $Window.Add_MouseLeftButtonDown({
 # Exit the game function
 function ExitGame {
     $Window.TaskbarItemInfo.Overlay = $null
-    $Window.Dispatcher.Invoke([Action]{ $Window.Close() })
+    $Window.Dispatcher.Invoke([Action]{$Window.Close()})
+    #$Window.Dispatcher.InvokeShutdown()
+    #$Window.Close()
 }
 
 # Dice controls
@@ -2219,4 +2212,4 @@ if (!$psISE) {
 # Close board window
 ExitGame
 
-### Buildings are not being sold...
+### Dice rolling is broken
