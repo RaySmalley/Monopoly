@@ -9,8 +9,6 @@ trap {
     if ($Window) {
         $Window.TaskbarItemInfo.Overlay = $null
         $Window.Dispatcher.Invoke([Action]{$Window.Close()})
-        #$Window.Dispatcher.InvokeShutdown()
-        #$Window.Close()
     }
     Exit 1
 }
@@ -62,18 +60,19 @@ if (!$psISE) {
 # Dice rolling function
 function DiceRoll {
     $DiceFaces = "$PSScriptRoot\Dice.png"
-    $DiceFacesImage = [System.Windows.Media.Imaging.BitmapImage]::new($DiceFaces)
-    $DiceImages = @( $null, (GetDiceFace 1), (GetDiceFace 2), (GetDiceFace 3), (GetDiceFace 4), (GetDiceFace 5), (GetDiceFace 6))
-    $LastDie1Roll = $null
-    $LastDie2Roll = $null
+    $DiceFacesImage = [System.Windows.Media.Imaging.BitmapImage]::New($DiceFaces)
 
     # Get individual dice faces from image
     function GetDiceFace($FaceNumber) {
-        $X = ($FaceNumber - 1) * 200
-        $Y = 0
-        $Rect = [System.Windows.Int32Rect]::new($X, $Y, 200, 200)
-        return [System.Windows.Media.Imaging.CroppedBitmap]::new($DiceFacesImage, $Rect)
+        $DiceX = ($FaceNumber - 1) * 200
+        $DiceY = 0
+        $DiceRect = [System.Windows.Int32Rect]::New($DiceX, $DiceY, 200, 200)
+        return [System.Windows.Media.Imaging.CroppedBitmap]::New($DiceFacesImage, $DiceRect)
     }
+
+    $DiceImages = @( $null, (GetDiceFace 1), (GetDiceFace 2), (GetDiceFace 3), (GetDiceFace 4), (GetDiceFace 5), (GetDiceFace 6))
+    $LastDie1Roll = $null
+    $LastDie2Roll = $null
 
     # Simple dice roll animation
     for ($i = 0; $i -lt 10; $i++) {
@@ -90,8 +89,9 @@ function DiceRoll {
         # Update dice images in the UI
         $DieImage1.Source = $DiceImages[$Die1Roll]
         $DieImage2.Source = $DiceImages[$Die2Roll]
-        $Window.Dispatcher.Invoke([Action]{
-        }, [System.Windows.Threading.DispatcherPriority]::Background)
+        $Window.Dispatcher.Invoke([Action]{}, [System.Windows.Threading.DispatcherPriority]::Background)
+        
+        if (!$Testing) {Start-Sleep -Milliseconds (100 + ($i * 10))}
     }
 
     if ($Die1Roll -eq $Die2Roll) {$Double = $true} else {$Double = $false}
@@ -363,7 +363,7 @@ function BankruptcyCheck {
             $RemainingPlayers += $Player
             $IsBankrupt = $false
         }
-        UpdatePlayerPieces -CurrentPlayer $Player
+        UpdatePlayerPieces
     }
     return @{
         RemainingPlayers = $RemainingPlayers
@@ -1169,7 +1169,7 @@ $Xaml = @"
 $Window = [Windows.Markup.XamlReader]::Parse($Xaml)
 $null = Register-ObjectEvent -InputObject $Window -EventName 'Closed' -Action { $Window.Dispatcher.InvokeShutdown() }
 $OS = Get-CimInstance Win32_OperatingSystem
-if ($OS.Version.StartsWith("11.")) {
+if ($OS.BuildNumber -gt 22000) {
     $Window.TaskbarItemInfo.Overlay = $GameBoardIcon
 }
 $Window.Show()
@@ -1181,8 +1181,6 @@ $Window.Add_MouseLeftButtonDown({
 function ExitGame {
     $Window.TaskbarItemInfo.Overlay = $null
     $Window.Dispatcher.Invoke([Action]{$Window.Close()})
-    #$Window.Dispatcher.InvokeShutdown()
-    #$Window.Close()
 }
 
 # Dice controls
@@ -1190,33 +1188,174 @@ $DieImage1 = $Window.FindName("DieImage1")
 $DieImage2 = $Window.FindName("DieImage2")
 
 # Create player pieces
-$PieceSize = 30
 $Spacing = 0
-$BoardCanvas = $Window.FindName('BoardCanvas')
+$PieceSize = 30
+#$BoardCanvas = $Window.FindName('BoardCanvas')
 $PlayerGrids = @{}
 
-# Update player pieces
-function UpdatePlayerPieces ($CurrentPlayer) {
-    $PlayerCurrentSpace = $CurrentPlayer.CurrentSpace
-    $PlayersOnSpace = @()
-    $PlayersInJail = @()
-    $PlayersVisiting = @()
-
+# Update player pieces function
+function UpdatePlayerPieces {
+    $BoardCanvas = $Window.FindName('BoardCanvas')
+    $AvailableIndexes = 0..7 | Get-Random -Count 8
+    
     foreach ($Player in $Players) {
-        if ($Player.CurrentSpace -eq $PlayerCurrentSpace) {
-            $PlayersOnSpace += $Player
-            if ($PlayerCurrentSpace -eq 10) {
-                if ($Player.InJail) {
-                    $PlayersInJail += $Player
-                } else {
-                    $PlayersVisiting += $Player
+        $PlayerGrid = $PlayerGrids[$Player.Name]
+        if ($PlayerGrid -eq $null) {
+            $RandomIndex = $AvailableIndexes[0]
+            $AvailableIndexes = $AvailableIndexes | Where-Object { $_ -ne $RandomIndex }
+            $PlayerGrid = New-Object System.Windows.Controls.Grid
+            $PlayerGrids[$Player.Name] = $PlayerGrid
+
+            $PlayerShape = $null
+            switch ($RandomIndex) {
+                0 { # Circle
+                    $PlayerShape = New-Object System.Windows.Shapes.Ellipse
+                }
+                1 { # Square
+                    $PlayerShape = New-Object System.Windows.Shapes.Rectangle
+                }
+                2 { # Triangle
+                    $PlayerShape = New-Object System.Windows.Shapes.Polygon
+                    $PlayerShape.Points = New-Object System.Windows.Media.PointCollection
+                    $PlayerShape.Points.Add((New-Object System.Windows.Point -ArgumentList 0, $PieceSize))
+                    $PlayerShape.Points.Add((New-Object System.Windows.Point -ArgumentList ($PieceSize / 2), 0))
+                    $PlayerShape.Points.Add((New-Object System.Windows.Point -ArgumentList $PieceSize, $PieceSize))
+                }
+                3 { # Rhombus
+                    $PlayerShape = New-Object System.Windows.Shapes.Path
+                    $PathGeometry = New-Object System.Windows.Media.PathGeometry
+                    $PathFigure = New-Object System.Windows.Media.PathFigure
+                    $PathFigure.StartPoint = New-Object System.Windows.Point -ArgumentList ($PieceSize / 2), 0
+                    $PathFigure.IsClosed = $true
+                    $PathGeometry.Figures.Add($PathFigure)
+
+                    $RhombusSegment = New-Object System.Windows.Media.PolyLineSegment
+                    $RhombusSegment.Points = New-Object System.Windows.Media.PointCollection
+                    $RhombusSegment.Points.Add((New-Object System.Windows.Point -ArgumentList $PieceSize, ($PieceSize / 2)))
+                    $RhombusSegment.Points.Add((New-Object System.Windows.Point -ArgumentList ($PieceSize / 2), $PieceSize))
+                    $RhombusSegment.Points.Add((New-Object System.Windows.Point -ArgumentList 0, ($PieceSize / 2)))
+
+                    $PathFigure.Segments.Add($RhombusSegment)
+                    $PlayerShape.Data = $PathGeometry
+                }
+                4 { # Star
+                    $PlayerShape = New-Object System.Windows.Shapes.Path
+                    $PathGeometry = New-Object System.Windows.Media.PathGeometry
+                    $PathFigure = New-Object System.Windows.Media.PathFigure
+                    $PathFigure.StartPoint = New-Object System.Windows.Point -ArgumentList ($PieceSize / 2), 0
+                    $PathFigure.IsClosed = $true
+                    $PathGeometry.Figures.Add($PathFigure)
+
+                    $StarSegment = New-Object System.Windows.Media.PolyLineSegment
+                    $StarSegment.Points = New-Object System.Windows.Media.PointCollection
+                    $StarSegment.Points.Add((New-Object System.Windows.Point -ArgumentList ($PieceSize * 0.62), ($PieceSize * 0.38)))
+                    $StarSegment.Points.Add((New-Object System.Windows.Point -ArgumentList ($PieceSize * 0.98), ($PieceSize * 0.38)))
+                    $StarSegment.Points.Add((New-Object System.Windows.Point -ArgumentList ($PieceSize * 0.67), ($PieceSize * 0.61)))
+                    $StarSegment.Points.Add((New-Object System.Windows.Point -ArgumentList ($PieceSize * 0.78), ($PieceSize * 0.97)))
+                    $StarSegment.Points.Add((New-Object System.Windows.Point -ArgumentList ($PieceSize * 0.5), ($PieceSize * 0.73)))
+                    $StarSegment.Points.Add((New-Object System.Windows.Point -ArgumentList ($PieceSize * 0.22), ($PieceSize * 0.97)))
+                    $StarSegment.Points.Add((New-Object System.Windows.Point -ArgumentList ($PieceSize * 0.33), ($PieceSize * 0.61)))
+                    $StarSegment.Points.Add((New-Object System.Windows.Point -ArgumentList 0.02, ($PieceSize * 0.38)))
+                    $StarSegment.Points.Add((New-Object System.Windows.Point -ArgumentList ($PieceSize * 0.38), ($PieceSize * 0.38)))
+
+                    $PathFigure.Segments.Add($StarSegment)
+                    $PlayerShape.Data = $PathGeometry
+                }
+                5 { # Pentagon
+                    $PlayerShape = New-Object System.Windows.Shapes.Path
+                    $PathGeometry = New-Object System.Windows.Media.PathGeometry
+                    $PathFigure = New-Object System.Windows.Media.PathFigure
+                    $PathFigure.StartPoint = New-Object System.Windows.Point -ArgumentList ($PieceSize / 2), 0
+                    $PathFigure.IsClosed = $true
+                    $PathGeometry.Figures.Add($PathFigure)
+
+                    $PentagonSegment = New-Object System.Windows.Media.PolyLineSegment
+                    $PentagonSegment.Points = New-Object System.Windows.Media.PointCollection
+                    $PentagonSegment.Points.Add((New-Object System.Windows.Point -ArgumentList $PieceSize, ($PieceSize * 0.381)))
+                    $PentagonSegment.Points.Add((New-Object System.Windows.Point -ArgumentList ($PieceSize * 0.809), $PieceSize))
+                    $PentagonSegment.Points.Add((New-Object System.Windows.Point -ArgumentList ($PieceSize * 0.191), $PieceSize))
+                    $PentagonSegment.Points.Add((New-Object System.Windows.Point -ArgumentList 0, ($PieceSize * 0.381)))
+
+                    $PathFigure.Segments.Add($PentagonSegment)
+                    $PlayerShape.Data = $PathGeometry
+                }
+                6 { # Hexagon
+                    $PlayerShape = New-Object System.Windows.Shapes.Path
+                    $PathGeometry = New-Object System.Windows.Media.PathGeometry
+                    $PathFigure = New-Object System.Windows.Media.PathFigure
+                    $PathFigure.StartPoint = New-Object System.Windows.Point -ArgumentList ($PieceSize * 0.25), 0
+                    $PathFigure.IsClosed = $true
+                    $PathGeometry.Figures.Add($PathFigure)
+
+                    $HexagonSegment = New-Object System.Windows.Media.PolyLineSegment
+                    $HexagonSegment.Points = New-Object System.Windows.Media.PointCollection
+                    $HexagonSegment.Points.Add((New-Object System.Windows.Point -ArgumentList ($PieceSize * 0.75), 0))
+                    $HexagonSegment.Points.Add((New-Object System.Windows.Point -ArgumentList $PieceSize, ($PieceSize * 0.5)))
+                    $HexagonSegment.Points.Add((New-Object System.Windows.Point -ArgumentList ($PieceSize * 0.75), $PieceSize))
+                    $HexagonSegment.Points.Add((New-Object System.Windows.Point -ArgumentList ($PieceSize * 0.25), $PieceSize))
+                    $HexagonSegment.Points.Add((New-Object System.Windows.Point -ArgumentList 0, ($PieceSize * 0.5)))
+
+                    $PathFigure.Segments.Add($HexagonSegment)
+                    $PlayerShape.Data = $PathGeometry
+                }
+                7 { # Octagon
+                    $PlayerShape = New-Object System.Windows.Shapes.Path
+                    $PathGeometry = New-Object System.Windows.Media.PathGeometry
+                    $PathFigure = New-Object System.Windows.Media.PathFigure
+                    $PathFigure.StartPoint = New-Object System.Windows.Point -ArgumentList ($PieceSize * 0.2929), 0
+                    $PathFigure.IsClosed = $true
+                    $PathGeometry.Figures.Add($PathFigure)
+
+                    $OctagonSegment = New-Object System.Windows.Media.PolyLineSegment
+                    $OctagonSegment.Points = New-Object System.Windows.Media.PointCollection
+                    $OctagonSegment.Points.Add((New-Object System.Windows.Point -ArgumentList ($PieceSize * 0.7071), 0))
+                    $OctagonSegment.Points.Add((New-Object System.Windows.Point -ArgumentList $PieceSize, ($PieceSize * 0.2929)))
+                    $OctagonSegment.Points.Add((New-Object System.Windows.Point -ArgumentList $PieceSize, ($PieceSize * 0.7071)))
+                    $OctagonSegment.Points.Add((New-Object System.Windows.Point -ArgumentList ($PieceSize * 0.7071), $PieceSize))
+                    $OctagonSegment.Points.Add((New-Object System.Windows.Point -ArgumentList ($PieceSize * 0.2929), $PieceSize))
+                    $OctagonSegment.Points.Add((New-Object System.Windows.Point -ArgumentList 0, ($PieceSize * 0.7071)))
+                    $OctagonSegment.Points.Add((New-Object System.Windows.Point -ArgumentList 0, ($PieceSize * 0.2929)))
+
+                    $PathFigure.Segments.Add($OctagonSegment)
+                    $PlayerShape.Data = $PathGeometry
+                }
+            }
+            
+            $PlayerShape.Width = $PieceSize
+            $PlayerShape.Height = $PieceSize
+            $PlayerShape.Fill = $Player.Color
+            $PlayerShape.Stroke = 'Black'
+
+            $PlayerTextBlock = New-Object System.Windows.Controls.TextBlock
+            $PlayerTextBlock.Text = $Player.Name.Substring(0, 1)
+            $PlayerTextBlock.VerticalAlignment = 'Center'
+            $PlayerTextBlock.HorizontalAlignment = 'Center'
+            $PlayerTextBlock.FontWeight = 'Bold'
+            $PlayerTextBlock.Foreground = 'Black'
+
+            $null = $PlayerGrid.Children.Add($PlayerShape)
+            $null = $PlayerGrid.Children.Add($PlayerTextBlock)
+            $null = $BoardCanvas.Children.Add($PlayerGrid)
+        }
+
+        $PlayerCurrentSpace = $Player.CurrentSpace
+        $PlayersOnSpace = @()
+        $PlayersInJail = @()
+        $PlayersVisiting = @()
+
+        foreach ($OtherPlayer in $Players) {
+            if ($OtherPlayer.CurrentSpace -eq $PlayerCurrentSpace) {
+                $PlayersOnSpace += $OtherPlayer
+                if ($PlayerCurrentSpace -eq 10) {
+                    if ($OtherPlayer.InJail) {
+                        $PlayersInJail += $OtherPlayer
+                    } else {
+                        $PlayersVisiting += $OtherPlayer
+                    }
                 }
             }
         }
-    }
 
-    foreach ($Player in $PlayersOnSpace) {
-        $PlayerGrid = $PlayerGrids[$Player.Name]
         if ($PlayerGrid -ne $null) {
             if ($PlayerCurrentSpace -eq 10) {
                 $PlayerIndex = [array]::IndexOf($PlayersInJail, $Player)
@@ -1229,47 +1368,24 @@ function UpdatePlayerPieces ($CurrentPlayer) {
                 $PlayerIndex = [array]::IndexOf($PlayersOnSpace, $Player)
                 $TotalPlayers = $PlayersOnSpace.Count
             }
-            
+
             $SpacingCalc = 22 / $TotalPlayers
             $AdjustedSpacing = $SpacingCalc * ($TotalPlayers - 1)
 
             if ($Player.InJail) {
-                $PlayerGridX = 53  - $AdjustedSpacing + ($PlayerIndex * $SpacingCalc * 2)
+                $PlayerGridX = 53 - $AdjustedSpacing + ($PlayerIndex * $SpacingCalc * 2)
                 $PlayerGridY = 718 - $AdjustedSpacing + ($PlayerIndex * $SpacingCalc * 2)
             } else {
                 $PlayerGridX = $Spaces[$PlayerCurrentSpace].X - $AdjustedSpacing + ($PlayerIndex * $SpacingCalc * 2)
                 $PlayerGridY = $Spaces[$PlayerCurrentSpace].Y - $AdjustedSpacing + ($PlayerIndex * $SpacingCalc * 2)
             }
-            $Window.Dispatcher.Invoke([Action]{
-                [Windows.Controls.Canvas]::SetLeft($PlayerGrid, $PlayerGridX)
-                [Windows.Controls.Canvas]::SetTop($PlayerGrid, $PlayerGridY)
-            }, [System.Windows.Threading.DispatcherPriority]::Background)
+            
+            [Windows.Controls.Canvas]::SetLeft($PlayerGrid, $PlayerGridX)
+            [Windows.Controls.Canvas]::SetTop($PlayerGrid, $PlayerGridY)
+            
+            $Window.Dispatcher.Invoke([Action]{}, [System.Windows.Threading.DispatcherPriority]::Background)
         }
     }
-}
-
-foreach ($Player in $Players) {
-    $PlayerGrid = New-Object System.Windows.Controls.Grid
-    $PlayerGrids[$Player.Name] = $PlayerGrid
-
-    $PlayerEllipse = New-Object System.Windows.Shapes.Ellipse
-    $PlayerEllipse.Width = $PieceSize
-    $PlayerEllipse.Height = $PieceSize
-    $PlayerEllipse.Fill = $Player.Color
-    $PlayerEllipse.Stroke = 'Black'
-
-    $PlayerTextBlock = New-Object System.Windows.Controls.TextBlock
-    $PlayerTextBlock.Text = $Player.Name.Substring(0, 1)
-    $PlayerTextBlock.VerticalAlignment = 'Center'
-    $PlayerTextBlock.HorizontalAlignment = 'Center'
-    $PlayerTextBlock.FontWeight = 'Bold'
-    $PlayerTextBlock.Foreground = 'Black'
-
-    $null = $PlayerGrid.Children.Add($PlayerEllipse)
-    $null = $PlayerGrid.Children.Add($PlayerTextBlock)
-    $null = $BoardCanvas.Children.Add($PlayerGrid)
-    
-    UpdatePlayerPieces -CurrentPlayer $Player
 }
 
 # Show property owner function
@@ -1322,11 +1438,11 @@ function UpdatePropertyOwner {
             $OwnerMarker.Height = $OwnerMarkerHeight
             $OwnerMarker.Fill = $OwnerMarkerColor
             $OwnerMarker.Stroke = 'Black'
-            $Window.Dispatcher.Invoke([Action]{
-                [Windows.Controls.Canvas]::SetLeft($OwnerMarker, $OwnerMarkerX)
-                [Windows.Controls.Canvas]::SetTop($OwnerMarker, $OwnerMarkerY)
-                $null = $PropertyOwnerCanvas.Children.Add($OwnerMarker)
-            }, [System.Windows.Threading.DispatcherPriority]::Background)
+            [Windows.Controls.Canvas]::SetLeft($OwnerMarker, $OwnerMarkerX)
+            [Windows.Controls.Canvas]::SetTop($OwnerMarker, $OwnerMarkerY)
+            $null = $PropertyOwnerCanvas.Children.Add($OwnerMarker)
+
+            $Window.Dispatcher.Invoke([Action]{}, [System.Windows.Threading.DispatcherPriority]::Background)
         }
     }
 }
@@ -1419,6 +1535,8 @@ function UpdateProperties {
                 [Windows.Controls.Canvas]::SetLeft($HotelRectangle, $HotelX)
                 [Windows.Controls.Canvas]::SetTop($HotelRectangle, $HotelY)
                 $null = $HousesAndHotelsCanvas.Children.Add($HotelRectangle)
+
+                $Window.Dispatcher.Invoke([Action]{}, [System.Windows.Threading.DispatcherPriority]::Background)
             }
         }
 
@@ -1433,30 +1551,30 @@ function UpdateProperties {
             $MortgagedLabel.VerticalAlignment = 'Center'
             $MortgagedLabel.HorizontalAlignment = 'Center'
 
-            $Window.Dispatcher.Invoke([Action]{
-                switch ($Side) {
-                    Bottom {
-                        [Windows.Controls.Canvas]::SetLeft($MortgagedLabel, $Space.X - 13)
-                        [Windows.Controls.Canvas]::SetTop($MortgagedLabel, $HouseY + 1)
-                    }
-                    Top {
-                        [Windows.Controls.Canvas]::SetLeft($MortgagedLabel, $Space.X - 13)
-                        [Windows.Controls.Canvas]::SetTop($MortgagedLabel, $HouseY + 1)
-                        $MortgagedLabel.LayoutTransform = New-Object Windows.Media.RotateTransform(180)
-                    }
-                    Left {
-                        [Windows.Controls.Canvas]::SetLeft($MortgagedLabel, $HouseX + 1)
-                        [Windows.Controls.Canvas]::SetTop($MortgagedLabel, $Space.Y - 13)
-                        $MortgagedLabel.LayoutTransform = New-Object Windows.Media.RotateTransform(90)
-                    }
-                    Right {
-                        [Windows.Controls.Canvas]::SetLeft($MortgagedLabel, $HouseX + 1)
-                        [Windows.Controls.Canvas]::SetTop($MortgagedLabel, $Space.Y - 13)
-                        $MortgagedLabel.LayoutTransform = New-Object Windows.Media.RotateTransform(270)
-                    }
+            switch ($Side) {
+                Bottom {
+                    [Windows.Controls.Canvas]::SetLeft($MortgagedLabel, $Space.X - 13)
+                    [Windows.Controls.Canvas]::SetTop($MortgagedLabel, $HouseY + 1)
                 }
-                $null = $HousesAndHotelsCanvas.Children.Add($MortgagedLabel)
-            }, [System.Windows.Threading.DispatcherPriority]::Background)
+                Top {
+                    [Windows.Controls.Canvas]::SetLeft($MortgagedLabel, $Space.X - 13)
+                    [Windows.Controls.Canvas]::SetTop($MortgagedLabel, $HouseY + 1)
+                    $MortgagedLabel.LayoutTransform = New-Object Windows.Media.RotateTransform(180)
+                }
+                Left {
+                    [Windows.Controls.Canvas]::SetLeft($MortgagedLabel, $HouseX + 1)
+                    [Windows.Controls.Canvas]::SetTop($MortgagedLabel, $Space.Y - 13)
+                    $MortgagedLabel.LayoutTransform = New-Object Windows.Media.RotateTransform(90)
+                }
+                Right {
+                    [Windows.Controls.Canvas]::SetLeft($MortgagedLabel, $HouseX + 1)
+                    [Windows.Controls.Canvas]::SetTop($MortgagedLabel, $Space.Y - 13)
+                    $MortgagedLabel.LayoutTransform = New-Object Windows.Media.RotateTransform(270)
+                }
+            }
+            $null = $HousesAndHotelsCanvas.Children.Add($MortgagedLabel)
+
+            $Window.Dispatcher.Invoke([Action]{}, [System.Windows.Threading.DispatcherPriority]::Background)
         }
     }
 }
@@ -1464,6 +1582,7 @@ function UpdateProperties {
 # Main game loop
 Write-Host `n
 Write-Host "Here we go!"`n
+UpdatePlayerPieces
 $PlayerIndex = 0
 while (($Players | Measure-Object).Count -gt 1) {
     $Player = $Players[$PlayerIndex]
@@ -1547,7 +1666,7 @@ while (($Players | Measure-Object).Count -gt 1) {
             for ($i = 0; $i -le $MoveCount; $i++) {
                 $Player.CurrentSpace = ($PreviousSpace + $i) % $Spaces.Count
                 $CurrentSpace = $Spaces[$Player.CurrentSpace]
-                UpdatePlayerPieces -CurrentPlayer $Player
+                UpdatePlayerPieces
                 if (!$Testing) {Start-Sleep -Milliseconds 500}
             }
             $SpaceColor = GetPropertyColor $CurrentSpace.SetColor
@@ -1701,7 +1820,7 @@ while (($Players | Measure-Object).Count -gt 1) {
                                 $CurrentSpace.Name = "Jail"
                             }
                             $SpaceColor = GetPropertyColor $CurrentSpace.SetColor
-                            UpdatePlayerPieces -CurrentPlayer $Player
+                            UpdatePlayerPieces
                             Write-Host "$($Player.Name) moved to " -NoNewline -ForegroundColor $Player.Color
                             if ($CurrentSpace.SetColor -eq 'Orange') {
                                 Write-Host $SpaceColor"$($CurrentSpace.Name)"`n$ResetColor
@@ -1717,7 +1836,7 @@ while (($Players | Measure-Object).Count -gt 1) {
                             $Player.CurrentSpace += $Card.SpaceMove
                             $CurrentSpace = $Spaces[$Player.CurrentSpace]
                             $SpaceColor = GetPropertyColor $CurrentSpace.SetColor
-                            UpdatePlayerPieces -CurrentPlayer $Player
+                            UpdatePlayerPieces
                             Write-Host "$($Player.Name) moved to " -NoNewline -ForegroundColor $Player.Color
                             if ($CurrentSpace.SetColor -eq 'Orange') {
                                 Write-Host $SpaceColor"$($CurrentSpace.Name)"`n$ResetColor
@@ -1758,7 +1877,7 @@ while (($Players | Measure-Object).Count -gt 1) {
                         if ($Card.Name -match 'Advance to the nearest') {
                             $Player.CurrentSpace = NextDestination -Name $($Card.Name).Trim().Split()[-1]
                             $CurrentSpace = $Spaces[$Player.CurrentSpace]
-                            UpdatePlayerPieces -CurrentPlayer $Player
+                            UpdatePlayerPieces
                             Write-Host "$($Player.Name) moved to " -NoNewline -ForegroundColor $Player.Color
                             if ($CurrentSpace.SetColor -eq 'Orange') {
                                 Write-Host $SpaceColor"$($CurrentSpace.Name)"`n$ResetColor
@@ -1774,7 +1893,7 @@ while (($Players | Measure-Object).Count -gt 1) {
                     Jail {
                         Write-Host "Go straight to jail! $($Player.Name) must roll a double to get out."`n -ForegroundColor $Player.Color
                         $Player.CurrentSpace = 10
-                        UpdatePlayerPieces -CurrentPlayer $Player
+                        UpdatePlayerPieces
                         $Player.InJail = $true
                         $Double = $false
                         if (!$Testing) {Start-Sleep -Milliseconds $Pause}
