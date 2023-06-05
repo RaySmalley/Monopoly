@@ -1743,12 +1743,14 @@ while (($Players | Measure-Object).Count -gt 1) {
                             Write-Host "but it is currenty mortgaged"`n -ForegroundColor $Player.Color
                         } else {
                         Write-Host "- pay them `$$($Rent)"`n -ForegroundColor $Player.Color
-                            if (($Player.Money - $Rent) -lt 0) {
+                            if ($Player.Money -lt $Rent) {
                                 $Player.Money -= $Rent
                                 $null = BankruptcyCheck
                                 if ($Player.Money -lt 0) {
                                     $Rent = $Rent + $Player.Money # Adjust rent if player went bankrupt and can't pay whole amount
                                 }
+                            } else {
+                                $Player.Money -= $Rent
                             }
                             ($Players | Where {$_.Name -eq $CurrentSpace.Owner}).Money += $Rent
                         }
