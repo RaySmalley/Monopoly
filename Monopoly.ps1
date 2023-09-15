@@ -2333,4 +2333,4 @@ if (!$psISE) {
 # Close board window
 ExitGame
 
-### Dice rolling is broken
+### Bankruptcy messaging not displaying
